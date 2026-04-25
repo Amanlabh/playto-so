@@ -2,9 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  color-scheme: light dark;
+}
+
 body {
   margin: 0;
   font-family: Inter, system-ui, sans-serif;
   background-color: #f9fafb;
   color: #111827;
+}
+
+html.dark body {
+  background-color: #030712;
+  color: #f3f4f6;
 }
