@@ -98,3 +98,4 @@ Three merchants pre-loaded with INR credit history:
 - Riya Sharma Designs — ₹45,500
 - Arjun Dev Studio — ₹37,500
 - Priya Content Co — ₹25,000
+# playto-so
