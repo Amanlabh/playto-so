@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { getMerchant, getLedger, getPayouts } from "../api/payouts";
+import { cacheGet, cacheSet } from "../lib/cache";
 import type { LedgerEntry, Merchant, Payout } from "../types";
 
 type ErrorResponse = {
   error?: string;
+};
+
+type CachedBundle = {
+  merchant: Merchant;
+  ledger: LedgerEntry[];
+  payouts: Payout[];
 };
 
 export function useMerchant(merchantId: string | null) {
@@ -28,6 +35,11 @@ export function useMerchant(merchantId: string | null) {
       setPayouts(pRes.data);
       setError(null);
       setRefreshedAt(new Date());
+      cacheSet<CachedBundle>(`merchant:${merchantId}`, {
+        merchant: mRes.data,
+        ledger: lRes.data,
+        payouts: pRes.data,
+      });
     } catch (e) {
       const message = axios.isAxiosError<ErrorResponse>(e)
         ? e.response?.data?.error
@@ -39,11 +51,20 @@ export function useMerchant(merchantId: string | null) {
   }, [merchantId]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!merchantId) return;
+    const cached = cacheGet<CachedBundle>(`merchant:${merchantId}`);
+    if (cached) {
+      setMerchant(cached.merchant);
+      setLedger(cached.ledger);
+      setPayouts(cached.payouts);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     refresh();
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
-  }, [refresh]);
+  }, [merchantId, refresh]);
 
   return { merchant, ledger, payouts, loading, error, refresh, refreshedAt };
 }

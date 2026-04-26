@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getMerchants } from "../api/payouts";
 import { useMerchant } from "../hooks/useMerchant";
 import { useTheme } from "../hooks/useTheme";
+import { cacheGet, cacheSet } from "../lib/cache";
 import BalanceCard from "../components/BalanceCard";
 import PayoutForm from "../components/PayoutForm";
 import PayoutTable from "../components/PayoutTable";
@@ -30,11 +31,32 @@ export default function Dashboard() {
     useMerchant(selectedId);
 
   useEffect(() => {
+    const cached = cacheGet<Merchant[]>("merchants");
+    if (cached?.length) {
+      setMerchants(cached);
+      const lastSelected = cacheGet<string>("selectedMerchantId");
+      const initialId =
+        (lastSelected && cached.find((m) => m.id === lastSelected)?.id) ||
+        cached[0].id;
+      setSelectedId(initialId);
+    }
     getMerchants().then((res) => {
       setMerchants(res.data);
-      if (res.data.length) setSelectedId(res.data[0].id);
+      cacheSet("merchants", res.data);
+      if (res.data.length && !selectedId) {
+        const lastSelected = cacheGet<string>("selectedMerchantId");
+        const initialId =
+          (lastSelected && res.data.find((m) => m.id === lastSelected)?.id) ||
+          res.data[0].id;
+        setSelectedId(initialId);
+      }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (selectedId) cacheSet("selectedMerchantId", selectedId);
+  }, [selectedId]);
 
   const nav = useMemo<NavItem[]>(
     () => [
