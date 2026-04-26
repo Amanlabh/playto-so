@@ -51,6 +51,7 @@ class CreatePayoutSerializer(serializers.Serializer):
 
 
 class CreatePayoutFlatSerializer(serializers.Serializer):
+    """Spec body: only amount_paise + bank_account_id. Merchant is derived
+    from the bank account, since each bank account belongs to exactly one merchant."""
     amount_paise = serializers.IntegerField(min_value=100)
     bank_account_id = serializers.UUIDField()
-    merchant_id = serializers.UUIDField()

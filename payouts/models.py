@@ -33,9 +33,12 @@ class Payout(models.Model):
         COMPLETED = "completed"
         FAILED = "failed"
 
+    # State transitions. PROCESSING -> PENDING is a legitimate system retry path
+    # (used only by retry_stuck_payouts when the worker hangs). All other
+    # backwards transitions remain blocked.
     ALLOWED_TRANSITIONS = {
         State.PENDING: {State.PROCESSING, State.FAILED},
-        State.PROCESSING: {State.COMPLETED, State.FAILED},
+        State.PROCESSING: {State.COMPLETED, State.FAILED, State.PENDING},
         State.COMPLETED: set(),
         State.FAILED: set(),
     }
@@ -45,14 +48,24 @@ class Payout(models.Model):
     bank_account = models.ForeignKey(BankAccount, on_delete=models.PROTECT)
     amount_paise = models.BigIntegerField()
     state = models.CharField(max_length=20, choices=State.choices, default=State.PENDING)
-    idempotency_key = models.CharField(max_length=255)
+    # Nullable so the cleanup task can NULL out keys past their TTL,
+    # freeing them for reuse without violating the partial uniqueness below.
+    idempotency_key = models.CharField(max_length=255, null=True, blank=True)
     attempts = models.IntegerField(default=0)
     failure_reason = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("merchant", "idempotency_key")
+        constraints = [
+            # Partial unique constraint: only enforces uniqueness for non-NULL keys.
+            # Postgres treats NULLs as distinct, so expired (NULLed) keys do not collide.
+            models.UniqueConstraint(
+                fields=["merchant", "idempotency_key"],
+                condition=models.Q(idempotency_key__isnull=False),
+                name="unique_active_idempotency_key",
+            ),
+        ]
         indexes = [
             models.Index(fields=["state", "updated_at"]),
             models.Index(fields=["merchant", "created_at"]),

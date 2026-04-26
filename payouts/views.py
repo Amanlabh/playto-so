@@ -1,5 +1,8 @@
 import uuid
+from datetime import timedelta
 from django.db import transaction, IntegrityError
+from django.db.models import F
+from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -9,6 +12,8 @@ from .serializers import (
     LedgerEntrySerializer, CreatePayoutSerializer, CreatePayoutFlatSerializer,
 )
 from .tasks import process_payout
+
+IDEMPOTENCY_TTL = timedelta(hours=24)
 
 
 @api_view(["GET"])
@@ -59,18 +64,22 @@ def _handle_create_payout(request, merchant_id, amount_paise, bank_account_id):
     except ValueError:
         return Response({"error": "Idempotency-Key must be a valid UUID"}, status=400)
 
-    # Fast path: key already exists
-    existing = Payout.objects.filter(
-        merchant_id=merchant_id,
-        idempotency_key=idempotency_key,
-    ).first()
-    if existing:
-        return Response(PayoutSerializer(existing).data, status=200)
-
+    payout = None
     try:
         with transaction.atomic():
-            # SELECT FOR UPDATE locks merchant row — serializes concurrent payout requests per merchant
+            # Lock merchant row first — serializes all concurrent requests for this merchant
             merchant = Merchant.objects.select_for_update().get(pk=merchant_id)
+
+            # Idempotency check inside the lock — safe from race conditions
+            # Keys expire after 24h so clients can reuse keys for genuinely new requests
+            cutoff = timezone.now() - IDEMPOTENCY_TTL
+            existing = Payout.objects.filter(
+                merchant_id=merchant_id,
+                idempotency_key=idempotency_key,
+                created_at__gte=cutoff,
+            ).first()
+            if existing:
+                return Response(PayoutSerializer(existing).data, status=200)
 
             try:
                 bank_account = BankAccount.objects.get(
@@ -85,8 +94,10 @@ def _handle_create_payout(request, merchant_id, amount_paise, bank_account_id):
                     status=422,
                 )
 
-            merchant.balance_paise -= amount_paise
-            merchant.save(update_fields=["balance_paise"])
+            # DB-level atomic decrement — no Python read-modify-write
+            Merchant.objects.filter(pk=merchant_id).update(
+                balance_paise=F("balance_paise") - amount_paise
+            )
 
             payout = Payout.objects.create(
                 merchant=merchant,
@@ -107,7 +118,7 @@ def _handle_create_payout(request, merchant_id, amount_paise, bank_account_id):
     except Merchant.DoesNotExist:
         return Response({"error": "Merchant not found"}, status=404)
     except IntegrityError:
-        # Concurrent request raced in with same idempotency key — return existing
+        # Concurrent request with same key slipped through before lock was acquired
         existing = Payout.objects.get(merchant_id=merchant_id, idempotency_key=idempotency_key)
         return Response(PayoutSerializer(existing).data, status=200)
 
@@ -135,15 +146,25 @@ def create_payout(request, merchant_id):
 
 @api_view(["POST"])
 def create_payout_flat(request):
-    """POST /api/v1/payouts — spec-compliant endpoint. merchant_id in body."""
+    """POST /api/v1/payouts — spec-compliant endpoint.
+    Body: amount_paise, bank_account_id. Merchant is derived from the bank account."""
     serializer = CreatePayoutFlatSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=400)
+
+    bank_account_id = serializer.validated_data["bank_account_id"]
+    try:
+        merchant_id = BankAccount.objects.values_list("merchant_id", flat=True).get(
+            pk=bank_account_id, is_active=True
+        )
+    except BankAccount.DoesNotExist:
+        return Response({"error": "Bank account not found or inactive"}, status=400)
+
     return _handle_create_payout(
         request,
-        serializer.validated_data["merchant_id"],
+        merchant_id,
         serializer.validated_data["amount_paise"],
-        serializer.validated_data["bank_account_id"],
+        bank_account_id,
     )
 
 

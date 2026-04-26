@@ -13,4 +13,8 @@ app.conf.beat_schedule = {
         "task": "payouts.tasks.retry_stuck_payouts",
         "schedule": timedelta(seconds=10),
     },
+    "expire-idempotency-keys": {
+        "task": "payouts.tasks.expire_idempotency_keys",
+        "schedule": timedelta(hours=1),
+    },
 }

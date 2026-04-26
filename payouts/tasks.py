@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 STUCK_THRESHOLD_SECONDS = 30
+IDEMPOTENCY_TTL = timedelta(hours=24)
 
 
 @shared_task(bind=True, max_retries=0)
@@ -80,14 +81,30 @@ def retry_stuck_payouts():
                 continue
 
             if p.attempts < MAX_ATTEMPTS:
-                p.state = Payout.State.PENDING
-                p.save(update_fields=["state", "updated_at"])
+                # Legitimate retry transition — PROCESSING -> PENDING is now in
+                # ALLOWED_TRANSITIONS specifically to support this system path.
+                p.failure_reason = ""
+                p.transition_to(Payout.State.PENDING)
                 delay = 2 ** p.attempts  # exponential: 2s, 4s, 8s
                 process_payout.apply_async(args=[str(p.id)], countdown=delay)
                 logger.info("Retrying stuck payout %s, attempt %d, delay %ds", p.id, p.attempts, delay)
             else:
                 _fail_and_refund(p)
                 logger.warning("Payout %s max retries exceeded, marked failed", p.id)
+
+
+@shared_task
+def expire_idempotency_keys():
+    """NULL out idempotency_key on payouts older than the TTL window.
+    The partial unique index ignores NULLs, freeing the key for reuse."""
+    cutoff = timezone.now() - IDEMPOTENCY_TTL
+    n = Payout.objects.filter(
+        created_at__lt=cutoff,
+        idempotency_key__isnull=False,
+    ).update(idempotency_key=None)
+    if n:
+        logger.info("Expired %d idempotency keys past TTL", n)
+    return {"expired": n}
 
 
 def _fail_and_refund(payout: Payout):
