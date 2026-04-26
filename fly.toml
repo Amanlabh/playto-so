@@ -1,0 +1,44 @@
+app = "playto-payout-engine"
+primary_region = "bom"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DEBUG = "False"
+
+[processes]
+  web = "gunicorn config.wsgi --bind 0.0.0.0:8080 --workers 2 --timeout 120"
+  worker = "celery -A config worker -l info --concurrency 2"
+  beat = "celery -A config beat -l info"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["web"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/api/v1/merchants/"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+  processes = ["web", "worker", "beat"]

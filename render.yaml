@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: playto-web
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /api/v1/merchants/
+    envVars:
+      - key: SECRET_KEY
+        value: PCXBZ-ffyu3FpaVuo-jCorOwjHcJ9sCR2zcRp0CSntTCoE4qAZcZ0lisKH0EQUVu1pg
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_SbiQB9GldvW1@ep-patient-pine-am65l2wr-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: REDIS_URL
+        value: rediss://default:gQAAAAAAASFtAAIgcDI3Njc5MGRmNDExY2Q0ZTEwOTg5NTE1ZjBmMTMzYWJjMQ@popular-collie-74093.upstash.io:6379
+      - key: ALLOWED_HOSTS
+        value: playto-web.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://frontend-bjltiixo2-amans-projects-7f59fca9.vercel.app
+      - key: DEBUG
+        value: "False"
+
+  - type: worker
+    name: playto-celery-worker
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config worker -l info --concurrency 2
+    envVars:
+      - key: SECRET_KEY
+        value: PCXBZ-ffyu3FpaVuo-jCorOwjHcJ9sCR2zcRp0CSntTCoE4qAZcZ0lisKH0EQUVu1pg
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_SbiQB9GldvW1@ep-patient-pine-am65l2wr-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: REDIS_URL
+        value: rediss://default:gQAAAAAAASFtAAIgcDI3Njc5MGRmNDExY2Q0ZTEwOTg5NTE1ZjBmMTMzYWJjMQ@popular-collie-74093.upstash.io:6379
+      - key: DEBUG
+        value: "False"
+
+  - type: worker
+    name: playto-celery-beat
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt && python manage.py migrate
+    startCommand: celery -A config beat -l info
+    envVars:
+      - key: SECRET_KEY
+        value: PCXBZ-ffyu3FpaVuo-jCorOwjHcJ9sCR2zcRp0CSntTCoE4qAZcZ0lisKH0EQUVu1pg
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_SbiQB9GldvW1@ep-patient-pine-am65l2wr-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: REDIS_URL
+        value: rediss://default:gQAAAAAAASFtAAIgcDI3Njc5MGRmNDExY2Q0ZTEwOTg5NTE1ZjBmMTMzYWJjMQ@popular-collie-74093.upstash.io:6379
+      - key: DEBUG
+        value: "False"
